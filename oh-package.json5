@@ -1,0 +1,16 @@
+{
+  "modelVersion": "6.1.0",
+  "name": "harmony_player",
+  "version": "0.1.0",
+  "description": "FIDS 航显播放器 — OpenHarmony 5.0 商业数字标牌端，原生壳 + ArkWeb WebView 复用 fids_webpage",
+  "main": "",
+  "author": "hzwl",
+  "license": "Apache-2.0",
+  "dependencies": {},
+  "devDependencies": {
+    "@ohos/hypium": "1.0.19"
+    // hvigor / hvigor-ohos-plugin 是 npm 包，由 DevEco hvigor wrapper 自动从 npm 拉，
+    // 不在 ohpm.openharmony.cn 仓库；放在这里会让 ohpm install 报 00617101 404。
+    // 版本由 hvigor/hvigor-config.json5 (modelVersion) 管理。
+  }
+}

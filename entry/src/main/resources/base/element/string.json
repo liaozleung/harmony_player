@@ -1,0 +1,14 @@
+{
+  "string": [
+    { "name": "module_desc", "value": "FIDS 播放器主模块" },
+    { "name": "EntryAbility_desc", "value": "FIDS 航显播放器" },
+    { "name": "EntryAbility_label", "value": "FIDS 播放器" },
+    { "name": "perm_internet_reason", "value": "用于心跳上报、MQTT 连接、加载航显页面" },
+    { "name": "perm_network_info_reason", "value": "用于检测网络连通性" },
+    { "name": "perm_wifi_info_reason", "value": "用于获取 IP 地址上报到管理后台" },
+    { "name": "perm_running_lock_reason", "value": "保持屏幕常亮，避免数字标牌进入休眠" },
+    { "name": "perm_edm_reboot_reason", "value": "运维远程重启设备" },
+    { "name": "perm_edm_reset_reason", "value": "运维远程关机设备" },
+    { "name": "perm_edm_lock_reason", "value": "运维远程关屏" }
+  ]
+}

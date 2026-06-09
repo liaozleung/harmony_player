@@ -1,0 +1,14 @@
+{
+  "app": {
+    "bundleName": "com.hzwl.fids.player",
+    "vendor": "hzwl",
+    "versionCode": 1000000,
+    "versionName": "0.1.0",
+    "icon": "$media:app_icon",
+    "label": "$string:app_name",
+    "minAPIVersion": 12,
+    "targetAPIVersion": 12,
+    // 数字标牌生产环境用 EDM 签名后再设置 true 进入 KIOSK 模式
+    "keepAlive": false
+  }
+}

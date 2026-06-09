@@ -1,0 +1,72 @@
+{
+  "module": {
+    "name": "entry",
+    "type": "entry",
+    "description": "$string:module_desc",
+    "mainElement": "EntryAbility",
+    "deviceTypes": [
+      "default",
+      "tablet"
+    ],
+    "deliveryWithInstall": true,
+    "installationFree": false,
+    "pages": "$profile:main_pages",
+    "abilities": [
+      {
+        "name": "EntryAbility",
+        "srcEntry": "./ets/entryability/EntryAbility.ets",
+        "description": "$string:EntryAbility_desc",
+        "icon": "$media:app_icon",
+        "label": "$string:EntryAbility_label",
+        "startWindowIcon": "$media:app_icon",
+        "startWindowBackground": "$color:start_window_background",
+        "exported": true,
+        "skills": [
+          {
+            "entities": ["entity.system.home"],
+            "actions": ["action.system.home"]
+          }
+        ]
+      }
+    ],
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET",
+        "reason": "$string:perm_internet_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO",
+        "reason": "$string:perm_network_info_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      },
+      {
+        "name": "ohos.permission.GET_WIFI_INFO",
+        "reason": "$string:perm_wifi_info_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      },
+      {
+        "name": "ohos.permission.RUNNING_LOCK",
+        "reason": "$string:perm_running_lock_reason",
+        "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      }
+      // ===== 以下 EDM 权限暂时注释 =====
+      // 等企业 EDM 证书就绪后再放开，否则普通签名应用安装会被拒
+      // {
+      //   "name": "ohos.permission.ENTERPRISE_REBOOT",
+      //   "reason": "$string:perm_edm_reboot_reason",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      // },
+      // {
+      //   "name": "ohos.permission.ENTERPRISE_RESET_DEVICE",
+      //   "reason": "$string:perm_edm_reset_reason",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      // },
+      // {
+      //   "name": "ohos.permission.ENTERPRISE_LOCK_DEVICE",
+      //   "reason": "$string:perm_edm_lock_reason",
+      //   "usedScene": { "abilities": ["EntryAbility"], "when": "always" }
+      // }
+    ]
+  }
+}

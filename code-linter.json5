@@ -1,0 +1,7 @@
+{
+  "files": {
+    "include": ["**/*.ets", "**/*.ts"],
+    "exclude": ["**/src/ohosTest/**/*", "**/src/test/**/*", "**/build/**/*", "**/oh_modules/**/*"]
+  },
+  "ruleSet": ["plugin:@performance/recommended", "plugin:@typescript-eslint/recommended", "plugin:@hw-stylistic/recommended"]
+}

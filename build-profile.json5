@@ -1,0 +1,60 @@
+{
+  "app": {
+    "signingConfigs": [
+      // 开发期使用 DevEco 自动生成的调试证书；生产期切换为 EDM 企业证书
+      // 在 DevEco Studio 中 File → Project Structure → Signing Configs 配置
+      {
+        "name": "default",
+        "material": {
+          "certpath": "/Users/hzwl/.ohos/config/openharmony/default_harmony_player_MrH5ka_SZY4h3OCYVwiLepXnoY7wPeL_0tJD3Zvl5bU=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001B573057D7B58F9A7C9CD18F42396B4C1F3BE374B1A15F42155EE65FFFBD364167116801E44D0C92",
+          "profile": "/Users/hzwl/.ohos/config/openharmony/default_harmony_player_MrH5ka_SZY4h3OCYVwiLepXnoY7wPeL_0tJD3Zvl5bU=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "/Users/hzwl/.ohos/config/openharmony/default_harmony_player_MrH5ka_SZY4h3OCYVwiLepXnoY7wPeL_0tJD3Zvl5bU=.p12",
+          "storePassword": "0000001BFF1D7A8F5EEAE8229AF3EC554333C2BD1E6E3EE6EE7BD54F41C4C0674F7806DDB4E819D3246FCE"
+        }
+      }
+    ],
+    "products": [
+      {
+        "name": "default",
+        "signingConfig": "default",
+        // runtimeOS=OpenHarmony 必须用整数 API level；
+        // 原值 "5.0.0(12)" 是 HarmonyOS 风格字符串，与 OpenHarmony 混用触发 00403002
+        "compileSdkVersion": 12,
+        "compatibleSdkVersion": 12,
+        "targetSdkVersion": 12,
+        "runtimeOS": "OpenHarmony",
+        "buildOption": {
+          "strictMode": {
+            "caseSensitiveCheck": true,
+            "useNormalizedOHMUrl": true
+          }
+        }
+      }
+    ],
+    "buildModeSet": [
+      {
+        "name": "debug"
+      },
+      {
+        "name": "release"
+      }
+    ]
+  },
+  "modules": [
+    {
+      "name": "entry",
+      "srcPath": "./entry",
+      "targets": [
+        {
+          "name": "default",
+          "applyToProducts": [
+            "default"
+          ]
+        }
+      ]
+    }
+  ]
+}

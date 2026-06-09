@@ -1,0 +1,36 @@
+# Dependencies
+**/node_modules
+**/oh_modules
+
+# Build outputs
+**/build
+**/dist
+**/.preview
+**/.hvigor
+**/.cxx
+*.har
+
+# IDE
+**/.idea
+**/.deveco
+.history
+.vscode
+
+# Native build
+**/.clangd
+**/.clang-format
+**/.clang-tidy
+
+# Test
+**/.test
+
+# Local config / generated
+**/local.properties
+oh-package-lock.json5
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
