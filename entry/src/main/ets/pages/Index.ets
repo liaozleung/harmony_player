@@ -1,6 +1,6 @@
 import { webview } from '@kit.ArkWeb';
 import router from '@ohos.router';
-import { KeyCode } from '@kit.InputKit';
+import { KeyCode, pointer } from '@kit.InputKit';
 import { ConfigStore } from '../services/ConfigStore';
 import { Watchdog } from '../services/Watchdog';
 import { ScreenshotService } from '../services/ScreenshotService';
@@ -30,6 +30,12 @@ struct Index {
   private offBrightness: (() => void) | null = null;
 
   aboutToAppear(): void {
+    // 进入显示页面 → 隐藏鼠标（数字标牌纯展示，不需要鼠标）
+    // ConfigPage 会在 aboutToAppear 重新显示，方便操作配置表单
+    pointer.setPointerVisible(false).catch((e: Object): void => {
+      Logger.warn(TAG, 'setPointerVisible(false) 失败', e);
+    });
+
     const cfg = ConfigStore.getInstance().getAll();
     Logger.info(TAG, 'aboutToAppear cfg=', JSON.stringify(cfg));
     if (!cfg.deviceId) {
@@ -116,6 +122,18 @@ struct Index {
           .onErrorReceive((event): void => {
             Logger.warn(TAG, 'Web 加载错误', event?.error?.getErrorInfo?.());
           })
+          // Web 抢键盘焦点，外层 Stack onKeyEvent 收不到 F2，
+          // 必须在 Web 组件上 onInterceptKeyEvent 提前拦截
+          .onInterceptKeyEvent((e: KeyEvent): boolean => {
+            if (e.type === KeyType.Down && e.keyCode === KeyCode.KEYCODE_F2) {
+              Logger.info(TAG, 'Web onInterceptKeyEvent F2 → 进入配置页');
+              router.pushUrl({ url: 'pages/ConfigPage' }).catch((err: Object): void =>
+                Logger.warn(TAG, 'router error', err)
+              );
+              return true; // 拦截，不让 Web 处理
+            }
+            return false;
+          })
           .width('100%')
           .height('100%')
 
@@ -126,7 +144,7 @@ struct Index {
               .fontSize(28).fontWeight(FontWeight.Bold).fontColor('#fff')
             Text('心跳成功后会自动从后台拉取，或等待 MQTT displayPage 推送')
               .fontSize(16).fontColor('#aaa').margin({ top: 16 })
-            Text('点击右上角"⚙ 配置"可重新进入配置页')
+            Text('按 F2 进入配置页')
               .fontSize(14).fontColor('#666').margin({ top: 8 })
           }
           .width('100%').height('100%')
@@ -135,7 +153,7 @@ struct Index {
         }
       }
 
-      // 亮度黑色覆盖层（zIndex 在悬浮按钮之下，配置按钮始终可点；hitTestBehavior=none 让点击穿透到 Web）
+      // 亮度黑色覆盖层（hitTestBehavior=None 让点击穿透到 Web）
       if (this.brightnessOverlayOpacity > 0) {
         Column()
           .width('100%').height('100%')
@@ -143,21 +161,6 @@ struct Index {
           .opacity(this.brightnessOverlayOpacity)
           .hitTestBehavior(HitTestMode.None)
       }
-
-      // 右上角永远显示的"⚙ 配置"悬浮按钮（鼠标可点；按 Z 排序在 Web 上方）
-      Button('⚙ 配置')
-        .fontSize(14)
-        .fontColor('#fff')
-        .backgroundColor('rgba(0,0,0,0.55)')
-        .height(36)
-        .padding({ left: 12, right: 12 })
-        .position({ x: '100%', y: 0 })
-        .markAnchor({ x: '100%', y: 0 })
-        .margin({ right: 16, top: 16 })
-        .onClick((): void => {
-          Logger.info(TAG, '点击⚙ 配置按钮');
-          router.pushUrl({ url: 'pages/ConfigPage' }).catch((e: Object): void => Logger.warn(TAG, 'router error', e));
-        })
     }
     .width('100%')
     .height('100%')

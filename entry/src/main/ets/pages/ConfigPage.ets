@@ -1,5 +1,5 @@
 import router from '@ohos.router';
-import { KeyCode } from '@kit.InputKit';
+import { KeyCode, pointer } from '@kit.InputKit';
 import { ConfigStore } from '../services/ConfigStore';
 import { DeviceConfig } from '../types/DeviceConfig';
 import { Logger } from '../utils/logger';
@@ -35,6 +35,11 @@ struct ConfigPage {
   @State message: string = '';
 
   aboutToAppear(): void {
+    // 进入配置页 → 显示鼠标（Index 进入时会再次隐藏）
+    pointer.setPointerVisible(true).catch((e: Object): void => {
+      Logger.warn(TAG, 'setPointerVisible(true) 失败', e);
+    });
+
     const c = ConfigStore.getInstance().getAll();
     this.deviceId = c.deviceId;
     this.deviceName = c.deviceName;
