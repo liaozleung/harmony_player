@@ -32,12 +32,20 @@ struct Index {
     }
     this.currentUrl = cfg.displayUrl ?? 'about:blank';
 
-    // 订阅 displayUrl 变化（来自 ConfigStore.set 或 MQTT displayPage）
+    // 订阅 displayUrl 变化（来自 ConfigStore.set 或 MQTT displayPage / 心跳响应）
+    // ArkUI Web 的 src 属性只在 mount 时使用一次，运行时变更不会触发 reload；
+    // 必须通过 controller.loadUrl 显式加载新 URL。
     this.offDisplayUrl = eventBus.on('displayUrlChanged', (url?: Object | null): void => {
       const newUrl: string = (typeof url === 'string') ? url : 'about:blank';
       if (newUrl !== this.currentUrl) {
+        Logger.info(TAG, `displayUrl 切换 ${this.currentUrl} → ${newUrl}`);
         this.currentUrl = newUrl;
         Watchdog.getInstance().reset();
+        try {
+          this.controller.loadUrl(newUrl);
+        } catch (e) {
+          Logger.warn(TAG, 'controller.loadUrl 失败', e);
+        }
       }
     });
 
