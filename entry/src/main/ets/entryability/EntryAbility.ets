@@ -35,6 +35,8 @@ export default class EntryAbility extends UIAbility {
       }
       // 全屏 + 隐藏状态栏 + 隐藏导航栏 + 屏幕常亮（数字标牌专用）
       windowStage.getMainWindow().then((win: window.Window): void => {
+        // 把 mainWindow 注入 SystemControl，供 setBrightness / screenOff 等使用
+        SystemControl.attachWindow(win);
         win.setWindowLayoutFullScreen(true).catch((e: Object): void => Logger.warn(TAG, 'setWindowLayoutFullScreen', e));
         try { win.setWindowKeepScreenOn(true); } catch (e) { Logger.warn(TAG, 'setWindowKeepScreenOn', e); }
         try {

@@ -4,6 +4,7 @@ import { KeyCode } from '@kit.InputKit';
 import { ConfigStore } from '../services/ConfigStore';
 import { Watchdog } from '../services/Watchdog';
 import { ScreenshotService } from '../services/ScreenshotService';
+import { BrightnessChangePayload } from '../services/SystemControl';
 import { eventBus } from '../utils/eventBus';
 import { Logger } from '../utils/logger';
 
@@ -14,12 +15,19 @@ const TAG = 'IndexPage';
 struct Index {
   @State currentUrl: string = '';
   @State isConfigMissing: boolean = false;
+  /**
+   * 亮度叠加层不透明度。SystemControl.setBrightness/screenOff 通过 eventBus 改这个值。
+   * brightnessChanged 事件来时：overlay opacity = 1 - brightness
+   * IDO-SBC7602 等屏蔽硬件背光的标牌主板上，这是唯一可见的亮度效果。
+   */
+  @State brightnessOverlayOpacity: number = 0;
   controller: webview.WebviewController = new webview.WebviewController();
 
   // 解绑句柄
   private offDisplayUrl: (() => void) | null = null;
   private offRefresh: (() => void) | null = null;
   private offCapture: (() => void) | null = null;
+  private offBrightness: (() => void) | null = null;
 
   aboutToAppear(): void {
     const cfg = ConfigStore.getInstance().getAll();
@@ -58,12 +66,22 @@ struct Index {
     this.offCapture = eventBus.on('captureScreenshot', () => {
       ScreenshotService.captureAndUpload(this.controller);
     });
+
+    // 亮度变化 → 调整黑色覆盖层不透明度
+    this.offBrightness = eventBus.on('brightnessChanged', (payload?: Object | null): void => {
+      if (!payload) return;
+      const p = payload as BrightnessChangePayload;
+      const v = Math.max(0, Math.min(1, p.brightness));
+      this.brightnessOverlayOpacity = 1 - v;
+      Logger.info(TAG, `亮度 overlay opacity → ${this.brightnessOverlayOpacity}`);
+    });
   }
 
   aboutToDisappear(): void {
     this.offDisplayUrl?.();
     this.offRefresh?.();
     this.offCapture?.();
+    this.offBrightness?.();
     Watchdog.getInstance().stop();
   }
 
@@ -115,6 +133,15 @@ struct Index {
           .justifyContent(FlexAlign.Center)
           .backgroundColor('#000')
         }
+      }
+
+      // 亮度黑色覆盖层（zIndex 在悬浮按钮之下，配置按钮始终可点；hitTestBehavior=none 让点击穿透到 Web）
+      if (this.brightnessOverlayOpacity > 0) {
+        Column()
+          .width('100%').height('100%')
+          .backgroundColor('#000')
+          .opacity(this.brightnessOverlayOpacity)
+          .hitTestBehavior(HitTestMode.None)
       }
 
       // 右上角永远显示的"⚙ 配置"悬浮按钮（鼠标可点；按 Z 排序在 Web 上方）

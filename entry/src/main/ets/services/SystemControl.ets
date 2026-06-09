@@ -1,30 +1,42 @@
 import { runningLock } from '@kit.BasicServicesKit';
+import { window } from '@kit.ArkUI';
+import { eventBus } from '../utils/eventBus';
 import { Logger } from '../utils/logger';
 
 const TAG = 'SystemControl';
 
+/** eventBus 'brightnessChanged' 事件 payload */
+export interface BrightnessChangePayload {
+  brightness: number;  // 0~1
+}
+
 /**
- * 系统控制 — Stub 模式
+ * 系统控制。
  *
- * 设计目的：调用方代码（MqttClient）零感知签名等级。
+ * 设计：调用方代码（MqttClient）零感知签名等级。
  * 普通签名能做的功能直接实现；EDM 才能做的功能暂时只打日志。
- * 等 EDM 证书就绪，把对应方法的 stub 部分替换为真实 API 调用即可。
  *
- * 状态对照表：
- * | 方法            | 普通签名         | EDM 签名               |
- * |---------------- |------------------|------------------------|
- * | reboot          | stub             | enterpriseDeviceControl.rebootDevice |
- * | poweroff        | stub             | enterpriseDeviceControl.shutdownDevice |
- * | screenOff       | stub             | lockScreen             |
- * | screenOn        | stub             | wakeUpDevice           |
- * | setBrightness   | stub（待选 API） | display 系列 API       |
+ * 状态对照：
+ * | 方法            | 普通签名实现                                    | EDM 签名               |
+ * |---------------- |-------------------------------------------------|------------------------|
+ * | reboot          | stub（无替代 API）                              | enterpriseDeviceControl.rebootDevice |
+ * | poweroff        | stub                                            | enterpriseDeviceControl.shutdownDevice |
+ * | screenOff       | window.setWindowBrightness(0) + 覆盖黑屏        | lockScreen             |
+ * | screenOn        | window.setWindowBrightness(lastBrightness)      | wakeUpDevice           |
+ * | setBrightness   | window.setWindowBrightness(value)               | brightness.setValue    |
  *
- * 注：@ohos.brightness 模块在 OpenHarmony 5.0 API 12 普通签名下不可用，
- *     全部亮度/锁屏接口改 stub；下个迭代选用 @kit.ArkUI / display 替代方案。
+ * 注：window.setWindowBrightness 只控制 app 窗口亮度，但全屏 KIOSK 模式下
+ *     等同于系统屏幕背光（对数字标牌使用场景足够）。
  */
 export class SystemControl {
   private static keepAwakeLock: runningLock.RunningLock | null = null;
-  private static lastBrightness = 0.5; // 关屏前缓存的亮度值
+  private static lastBrightness = 0.8;
+  private static mainWindow: window.Window | null = null;
+
+  /** EntryAbility.onWindowStageCreate 内调一次，注入 window 引用 */
+  static attachWindow(win: window.Window): void {
+    SystemControl.mainWindow = win;
+  }
 
   /** EDM 才能做：整机重启 */
   static async reboot(): Promise<void> {
@@ -38,38 +50,63 @@ export class SystemControl {
     Logger.warn(TAG, 'poweroff stub — 等待 EDM 证书');
   }
 
-  /** 关屏 stub（普通签名暂无可用 API；EDM 用 lockScreen） */
+  /**
+   * 关屏：双管齐下
+   *   1. window.setWindowBrightness(0) — 走系统 API（厂家屏蔽时无效）
+   *   2. eventBus emit 'brightnessChanged' 0 → Index 叠一层全黑 overlay 视觉模拟
+   * 第 2 步在 IDO-SBC7602 等屏蔽硬件背光的标牌主板上是唯一可见效果。
+   */
   static async screenOff(): Promise<void> {
     Logger.info(TAG, 'screenOff 调用');
-    Logger.warn(TAG, 'screenOff stub — 等待 @kit.ArkUI display API 评估 / EDM');
+    await SystemControl.applyBrightness(0);
   }
 
-  /** 开屏 stub */
+  /** 开屏：恢复到关屏前的亮度 */
   static async screenOn(): Promise<void> {
     Logger.info(TAG, 'screenOn 调用');
-    Logger.warn(TAG, 'screenOn stub — 等待 @kit.ArkUI display API 评估 / EDM');
-  }
-
-  /** 设置亮度，0..1（stub，只更新缓存值） */
-  static async setBrightness(value: number): Promise<void> {
-    const v = Math.max(0, Math.min(1, value));
-    SystemControl.lastBrightness = v;
-    Logger.info(TAG, `setBrightness ${v} (stub)`);
+    await SystemControl.applyBrightness(SystemControl.lastBrightness);
   }
 
   /**
-   * 屏幕常亮（数字标牌一般需要）
-   * OpenHarmony 5.0 API 12 RunningLockType 在普通签名仅 BACKGROUND 可用，
-   * 用 PROXIMITY_SCREEN_CONTROL / SCREEN 都需要系统签名。
-   * 这里用 BACKGROUND 让进程不被冻结；KEEP_SCREEN_ON 改由 window.setKeepScreenOn 在 Index 页面控制。
+   * 设置亮度。
+   * 兼容两种值域：
+   *   - 0~1（float，符合 setWindowBrightness 原生 API）
+   *   - 0~100（int，fids admin UI slider 是百分比）→ 自动 / 100
+   */
+  static async setBrightness(value: number): Promise<void> {
+    const normalized = value > 1 ? value / 100 : value;
+    const v = Math.max(0, Math.min(1, normalized));
+    SystemControl.lastBrightness = v;
+    Logger.info(TAG, `setBrightness raw=${value} → normalized=${v}`);
+    await SystemControl.applyBrightness(v);
+  }
+
+  /** 内部：把 [0,1] 亮度值同时下发给 setWindowBrightness 和 UI overlay */
+  private static async applyBrightness(v: number): Promise<void> {
+    if (SystemControl.mainWindow) {
+      try {
+        await SystemControl.mainWindow.setWindowBrightness(v);
+        Logger.info(TAG, `setWindowBrightness(${v}) 返回成功`);
+      } catch (e) {
+        Logger.warn(TAG, 'setWindowBrightness 失败（继续走 UI overlay）', e);
+      }
+    }
+    // 触发 Index 叠加黑色 overlay：opacity = 1 - v
+    const payload: BrightnessChangePayload = { brightness: v };
+    eventBus.emit('brightnessChanged', payload as Object);
+  }
+
+  /**
+   * 后台运行锁（屏幕常亮由 window.setWindowKeepScreenOn 单独处理）。
+   * RunningLockType.SCREEN 需要系统签名；BACKGROUND 普通签名可用（API 12 deprecated 但仍可用）。
    */
   static async acquireScreenAwake(): Promise<void> {
     if (SystemControl.keepAwakeLock) return;
     try {
       const lock = await runningLock.create('fids-bg-awake', runningLock.RunningLockType.BACKGROUND);
-      lock.hold(0); // 0 = 一直持有
+      lock.hold(0);
       SystemControl.keepAwakeLock = lock;
-      Logger.info(TAG, '后台运行锁已开启（屏幕常亮由 window.setKeepScreenOn 单独处理）');
+      Logger.info(TAG, '后台运行锁已开启');
     } catch (e) {
       Logger.warn(TAG, '获取后台运行锁失败', e);
     }
