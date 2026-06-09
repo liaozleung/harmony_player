@@ -1,4 +1,14 @@
 import { util } from '@kit.ArkTS';
+import { common } from '@kit.AbilityKit';
+import {
+  MqttAsync,
+  MqttClient as OhMqttClient,
+  MqttClientOptions,
+  MqttConnectOptions,
+  MqttResponse,
+  MqttMessage,
+  MqttSubscribeOptions
+} from '@ohos/mqtt';
 import { ConfigStore, ConfigChangePayload } from './ConfigStore';
 import { HeartbeatService } from './HeartbeatService';
 import { SystemControl } from './SystemControl';
@@ -9,21 +19,23 @@ import { MqttCommand } from '../types/MqttCommand';
 const TAG = 'MqttClient';
 
 /**
- * MQTT 客户端 — 占位实现
+ * MQTT 客户端 — 基于 @ohos/mqtt（OpenHarmony SIG 维护，paho.mqtt.c 包装）。
  *
- * ⚠️ 当前是占位骨架。真正的 MQTT 实现需要：
- *   1. 第一周技术验证：移植 mqtt.js 到 ArkTS（推荐），或选社区 oh-package
- *   2. 走 WebSocket 子协议（broker 一般同时开 1883 + 8083）
- *   3. 集成到这个文件，替换下方 connect() 内的 TODO 部分
- *
- * 协议约定（与 Electron 端一致，不可改）：
+ * 协议约定（与 fids_player_electron / client_player_electron 一致）：
  *   订阅 topic：
- *     device/{deviceId}
- *     device/{deviceId}/layout/#
- *   payload 是 JSON 字符串，参考 types/MqttCommand.ets
+ *     device/{deviceId}                          ← 单设备命令
+ *     device/{deviceId}/layout/#                 ← 布局相关（保留扩展位）
+ *   payload 是 JSON 字符串，结构见 types/MqttCommand.ets
+ *
+ * 三种状态：
+ *   - 未配置（deviceId 或 mqttBroker 为空）→ 跳过
+ *   - 连接中 / 已连接 → connected=true
+ *   - 已断开（connectLost 回调触发）→ 退避重连
  */
 export class MqttClient {
   private static instance: MqttClient | null = null;
+  private context: common.Context | null = null;
+  private client: OhMqttClient | null = null;
   private connected = false;
   private retryDelay = 1000;
   private retryTimer: number | null = null;
@@ -33,32 +45,52 @@ export class MqttClient {
     return MqttClient.instance;
   }
 
+  /** 必须在 EntryAbility.onCreate 内调一次，提供 context 用于 MQTT 文件持久化 */
+  attachContext(context: common.Context): void {
+    this.context = context;
+  }
+
   start(): void {
     eventBus.on('configChanged', (payload?: Object | null): void => {
-      // 批量更新时 payload 为 null，保守起见也重连
       if (payload === null || payload === undefined) {
         this.restart();
         return;
       }
       const change = payload as ConfigChangePayload;
       const key = change.key;
-      // mqtt 配置项变化才重连
       if (key.startsWith('mqtt') || key === 'deviceId') this.restart();
     });
     this.restart();
   }
 
-  stop(): void {
-    if (this.retryTimer !== null) { clearTimeout(this.retryTimer); this.retryTimer = null; }
-    if (this.connected) {
-      // TODO: client.end()
-      this.connected = false;
+  async stop(): Promise<void> {
+    if (this.retryTimer !== null) {
+      clearTimeout(this.retryTimer);
+      this.retryTimer = null;
     }
+    if (this.client) {
+      try {
+        if (this.connected) await this.client.disconnect();
+      } catch (e) {
+        Logger.warn(TAG, 'disconnect 异常', e);
+      }
+      try {
+        await this.client.destroy();
+      } catch (e) {
+        Logger.warn(TAG, 'destroy 异常', e);
+      }
+      this.client = null;
+    }
+    this.connected = false;
   }
 
   private restart(): void {
-    this.stop();
-    this.connect();
+    // restart 是同步触发，但 stop / connect 是 async，串起来
+    this.stop().then(async (): Promise<void> => {
+      await this.connect();
+    }).catch((e: Object): void => {
+      Logger.error(TAG, 'restart 异常', e);
+    });
   }
 
   private async connect(): Promise<void> {
@@ -67,53 +99,91 @@ export class MqttClient {
       Logger.info(TAG, '设备未配置，暂不连接 MQTT');
       return;
     }
+    const port = cfg.mqttPort || 1883;
+    const url = `tcp://${cfg.mqttBroker}:${port}`;
+    Logger.info(TAG, `连接 MQTT: ${url} clientId=${cfg.deviceId}`);
 
-    Logger.info(TAG, `连接 MQTT: ${cfg.mqttBroker}:${cfg.mqttPort} deviceId=${cfg.deviceId}`);
+    try {
+      const opts: MqttClientOptions = {
+        url,
+        clientId: cfg.deviceId,
+        // persistenceType=1 即内存持久化；=0 需配 persistenceContext 文件路径
+        persistenceType: 1
+      };
+      this.client = new OhMqttClient(opts);
 
-    // ╔══════════════════════════════════════════════════════════╗
-    // ║  TODO: 替换为真实 MQTT 连接                                 ║
-    // ║                                                            ║
-    // ║  推荐方案：移植 mqtt.js（纯 JS，走 @ohos.net.webSocket）    ║
-    // ║                                                            ║
-    // ║  伪代码：                                                   ║
-    // ║    const url = `ws://${cfg.mqttBroker}:8083/mqtt`;         ║
-    // ║    this.client = mqtt.connect(url, {                       ║
-    // ║      clientId: cfg.deviceId,                               ║
-    // ║      username: cfg.mqttUsername,                           ║
-    // ║      password: cfg.mqttPassword,                           ║
-    // ║      reconnectPeriod: 5000,                                ║
-    // ║      keepalive: 60                                         ║
-    // ║    });                                                     ║
-    // ║    this.client.on('connect', () => this.onConnect());      ║
-    // ║    this.client.on('message', (t, p) => this.onMessage(t,p));║
-    // ║    this.client.on('error', (e) => this.onError(e));        ║
-    // ║    this.client.on('close', () => this.onClose());          ║
-    // ╚══════════════════════════════════════════════════════════╝
+      // ⚠️ messageArrived 必须在 subscribe 之前注册，否则消息会丢
+      this.client.messageArrived((err: Error, msg: MqttMessage): void => {
+        if (err) {
+          Logger.warn(TAG, 'messageArrived err', err);
+          return;
+        }
+        void this.onMessage(msg.topic, msg.payload);
+      });
 
-    Logger.warn(TAG, 'MQTT 客户端未实现，请先完成 mqtt.js 移植');
+      // 断线回调（断网 / broker 关闭等被动断开）
+      this.client.connectLost((err: Error, data: MqttResponse): void => {
+        this.connected = false;
+        eventBus.emit('mqttDisconnected');
+        Logger.warn(TAG, '断线', err?.message ?? '', data?.message ?? '');
+        this.scheduleReconnect();
+      });
+
+      const connectOpts: MqttConnectOptions = {
+        userName: cfg.mqttUsername || '',
+        password: cfg.mqttPassword || '',
+        cleanSession: true,
+        keepAliveInterval: 30,
+        connectTimeout: 10,
+        automaticReconnect: false   // 我们自己控制重连节奏
+      };
+      const ok = await this.client.connect(connectOpts);
+      if (!ok) {
+        throw new Error('connect 返回 false');
+      }
+      this.connected = true;
+      this.retryDelay = 1000;
+      Logger.info(TAG, 'MQTT 已连接');
+      eventBus.emit('mqttConnected');
+
+      // 订阅 device/{deviceId} + device/{deviceId}/layout/#
+      const subs: MqttSubscribeOptions[] = [
+        { topic: `device/${cfg.deviceId}`, qos: 1 },
+        { topic: `device/${cfg.deviceId}/layout/#`, qos: 1 }
+      ];
+      await this.client.subscribeMany(subs);
+      Logger.info(TAG, `已订阅: ${subs.map((s: MqttSubscribeOptions): string => s.topic).join(', ')}`);
+    } catch (e) {
+      Logger.error(TAG, 'MQTT 连接失败', e);
+      this.connected = false;
+      this.scheduleReconnect();
+    }
   }
 
-  private onConnect(deviceId: string): void {
-    this.connected = true;
-    this.retryDelay = 1000;
-    Logger.info(TAG, '连接成功，订阅 topic');
-    eventBus.emit('mqttConnected');
-
-    // TODO: 真实订阅
-    // this.client.subscribe([
-    //   `device/${deviceId}`,
-    //   `device/${deviceId}/layout/#`,
-    // ], { qos: 1 });
+  /** 指数退避重连（1s → 2s → 4s → ... 最多 60s） */
+  private scheduleReconnect(): void {
+    if (this.retryTimer !== null) return;
+    const delay = this.retryDelay;
+    Logger.info(TAG, `${delay}ms 后重连`);
+    this.retryTimer = setTimeout((): void => {
+      this.retryTimer = null;
+      this.retryDelay = Math.min(this.retryDelay * 2, 60_000);
+      this.restart();
+    }, delay);
   }
 
   /** 收到 MQTT 消息后路由到具体处理 */
-  private async onMessage(topic: string, payloadBytes: Uint8Array): Promise<void> {
+  private async onMessage(topic: string, payloadStr: string | ArrayBuffer): Promise<void> {
     try {
-      // ArkTS 没有全局 TextDecoder，用 @kit.ArkTS util.TextDecoder
-      const decoder = util.TextDecoder.create('utf-8');
-      const payloadStr = decoder.decodeToString(payloadBytes);
-      Logger.info(TAG, `MQTT 收到 topic=${topic} payload=${payloadStr}`);
-      const cmd = JSON.parse(payloadStr) as MqttCommand;
+      let text: string;
+      if (typeof payloadStr === 'string') {
+        text = payloadStr;
+      } else {
+        const decoder = util.TextDecoder.create('utf-8');
+        text = decoder.decodeToString(new Uint8Array(payloadStr));
+      }
+      Logger.info(TAG, `MQTT 收到 topic=${topic} payload=${text}`);
+      const cmd = JSON.parse(text) as MqttCommand;
       await this.handleCommand(cmd);
     } catch (e) {
       Logger.error(TAG, '处理 MQTT 消息失败', e);

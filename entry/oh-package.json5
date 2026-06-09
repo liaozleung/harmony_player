@@ -6,8 +6,8 @@
   "author": "hzwl",
   "license": "Apache-2.0",
   "dependencies": {
-    // mqtt 客户端 — 第一周可行性验证后从下面 3 个候选选定
-    // "@ohos/mqtt": "x.y.z",     // 候选 1：社区移植
-    // 自研 / mqtt.js 移植 — 暂时占位
-  }
+    "@ohos/mqtt": "^2.0.28"
+  },
+  "devDependencies": {},
+  "dynamicDependencies": {}
 }

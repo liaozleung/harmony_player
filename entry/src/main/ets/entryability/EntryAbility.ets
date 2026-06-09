@@ -18,6 +18,7 @@ export default class EntryAbility extends UIAbility {
     await SystemControl.acquireScreenAwake();
     // 启动后台 service
     HeartbeatService.getInstance().start();
+    MqttClient.getInstance().attachContext(this.context);
     MqttClient.getInstance().start();
   }
 
