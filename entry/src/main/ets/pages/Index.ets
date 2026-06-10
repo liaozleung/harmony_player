@@ -5,6 +5,7 @@ import { ConfigStore } from '../services/ConfigStore';
 import { Watchdog } from '../services/Watchdog';
 import { ScreenshotService } from '../services/ScreenshotService';
 import { BrightnessChangePayload } from '../services/SystemControl';
+import { RegionChangePayload } from '../types/MqttCommand';
 import { eventBus } from '../utils/eventBus';
 import { Logger } from '../utils/logger';
 
@@ -21,13 +22,22 @@ struct Index {
    * IDO-SBC7602 等屏蔽硬件背光的标牌主板上，这是唯一可见的亮度效果。
    */
   @State brightnessOverlayOpacity: number = 0;
+  /**
+   * 区域公告（displayRegion）。url 非空时主 Web 缩到 1-fraction，position 侧显示公告 iframe。
+   * 收到 displayRegion url='' 时清空 url 恢复主区全屏。
+   */
+  @State regionUrl: string = '';
+  @State regionPosition: 'right' | 'bottom' = 'right';
+  @State regionFraction: number = 0.3;
   controller: webview.WebviewController = new webview.WebviewController();
+  regionController: webview.WebviewController = new webview.WebviewController();
 
   // 解绑句柄
   private offDisplayUrl: (() => void) | null = null;
   private offRefresh: (() => void) | null = null;
   private offCapture: (() => void) | null = null;
   private offBrightness: (() => void) | null = null;
+  private offRegion: (() => void) | null = null;
 
   aboutToAppear(): void {
     // 进入显示页面 → 隐藏鼠标（数字标牌纯展示，不需要鼠标）
@@ -81,6 +91,24 @@ struct Index {
       this.brightnessOverlayOpacity = 1 - v;
       Logger.info(TAG, `亮度 overlay opacity → ${this.brightnessOverlayOpacity}`);
     });
+
+    // 区域公告 displayRegion
+    this.offRegion = eventBus.on('regionChanged', (payload?: Object | null): void => {
+      if (!payload) return;
+      const p = payload as RegionChangePayload;
+      if (!p.url || p.url.length === 0) {
+        // 撤销区域公告
+        Logger.info(TAG, '区域公告撤销 → 主 Web 全屏');
+        this.regionUrl = '';
+        return;
+      }
+      Logger.info(TAG, `区域公告启用 position=${p.position} fraction=${p.fraction} url=${p.url}`);
+      this.regionPosition = p.position;
+      this.regionFraction = p.fraction;
+      this.regionUrl = p.url;
+      // 用 controller.loadUrl 确保 region Web reload 到新 url
+      try { this.regionController.loadUrl(p.url); } catch (_) { /* 第一次 mount 时 controller 还没初始化，直接靠 src 加载 */ }
+    });
   }
 
   aboutToDisappear(): void {
@@ -88,7 +116,51 @@ struct Index {
     this.offRefresh?.();
     this.offCapture?.();
     this.offBrightness?.();
+    this.offRegion?.();
     Watchdog.getInstance().stop();
+  }
+
+  @Builder
+  MainWeb() {
+    Web({ src: this.currentUrl, controller: this.controller })
+      .domStorageAccess(true)
+      .javaScriptAccess(true)
+      .fileAccess(true)
+      .imageAccess(true)
+      .userAgent('FidsHarmonyPlayer/1.0 (OpenHarmony)')
+      .onPageEnd((): void => {
+        Watchdog.getInstance().attach(this.controller);
+      })
+      .onErrorReceive((event): void => {
+        Logger.warn(TAG, 'Web 加载错误', event?.error?.getErrorInfo?.());
+      })
+      // Web 抢键盘焦点 → 必须在 Web 组件上 onInterceptKeyEvent 提前拦截
+      .onInterceptKeyEvent((e: KeyEvent): boolean => {
+        if (e.type === KeyType.Down && e.keyCode === KeyCode.KEYCODE_F2) {
+          Logger.info(TAG, 'Web onInterceptKeyEvent F2 → 进入配置页');
+          router.pushUrl({ url: 'pages/ConfigPage' }).catch((err: Object): void =>
+            Logger.warn(TAG, 'router error', err)
+          );
+          return true;
+        }
+        return false;
+      })
+      .width('100%')
+      .height('100%')
+  }
+
+  @Builder
+  RegionWeb() {
+    Web({ src: this.regionUrl, controller: this.regionController })
+      .domStorageAccess(true)
+      .javaScriptAccess(true)
+      .fileAccess(true)
+      .imageAccess(true)
+      .onErrorReceive((event): void => {
+        Logger.warn(TAG, 'Region Web 加载错误', event?.error?.getErrorInfo?.());
+      })
+      .width('100%')
+      .height('100%')
   }
 
   build() {
@@ -108,34 +180,21 @@ struct Index {
         .height('100%')
         .justifyContent(FlexAlign.Center)
         .backgroundColor('#000')
+      } else if (this.regionUrl && this.regionUrl.length > 0) {
+        // displayRegion 区域公告分屏模式：主区缩 + position 侧显示公告 iframe
+        if (this.regionPosition === 'right') {
+          Row() {
+            Column() { this.MainWeb() }.layoutWeight(1 - this.regionFraction).height('100%')
+            Column() { this.RegionWeb() }.layoutWeight(this.regionFraction).height('100%')
+          }.width('100%').height('100%')
+        } else {
+          Column() {
+            Column() { this.MainWeb() }.layoutWeight(1 - this.regionFraction).width('100%')
+            Column() { this.RegionWeb() }.layoutWeight(this.regionFraction).width('100%')
+          }.width('100%').height('100%')
+        }
       } else {
-        Web({ src: this.currentUrl, controller: this.controller })
-          .domStorageAccess(true)
-          .javaScriptAccess(true)
-          .fileAccess(true)
-          .imageAccess(true)
-          // 注：userAgent() 在 API 12 deprecated，但替代 API customizeSchemes 不通用，先保留
-          .userAgent('FidsHarmonyPlayer/1.0 (OpenHarmony)')
-          .onPageEnd((): void => {
-            Watchdog.getInstance().attach(this.controller);
-          })
-          .onErrorReceive((event): void => {
-            Logger.warn(TAG, 'Web 加载错误', event?.error?.getErrorInfo?.());
-          })
-          // Web 抢键盘焦点，外层 Stack onKeyEvent 收不到 F2，
-          // 必须在 Web 组件上 onInterceptKeyEvent 提前拦截
-          .onInterceptKeyEvent((e: KeyEvent): boolean => {
-            if (e.type === KeyType.Down && e.keyCode === KeyCode.KEYCODE_F2) {
-              Logger.info(TAG, 'Web onInterceptKeyEvent F2 → 进入配置页');
-              router.pushUrl({ url: 'pages/ConfigPage' }).catch((err: Object): void =>
-                Logger.warn(TAG, 'router error', err)
-              );
-              return true; // 拦截，不让 Web 处理
-            }
-            return false;
-          })
-          .width('100%')
-          .height('100%')
+        this.MainWeb()
 
         // displayUrl 为空时显示"等待显示页面"提示层（防止用户面对一片白屏不知所措）
         if (!this.currentUrl || this.currentUrl === 'about:blank') {

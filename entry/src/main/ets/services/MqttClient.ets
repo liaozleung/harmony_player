@@ -14,7 +14,7 @@ import { HeartbeatService } from './HeartbeatService';
 import { SystemControl } from './SystemControl';
 import { eventBus } from '../utils/eventBus';
 import { Logger } from '../utils/logger';
-import { MqttCommand } from '../types/MqttCommand';
+import { MqttCommand, RegionChangePayload } from '../types/MqttCommand';
 
 const TAG = 'MqttClient';
 
@@ -194,10 +194,30 @@ export class MqttClient {
   private async handleCommand(cmd: MqttCommand): Promise<void> {
     switch (cmd.action) {
       case 'displayPage': {
-        if (cmd.url) {
-          await ConfigStore.getInstance().setDisplayUrl(cmd.url);
-          // 延迟 3s 上报 page_loaded，与 Electron 端协议对齐
-          HeartbeatService.getInstance().reportPageLoaded(cmd.url);
+        // overlay 协议（来自多媒体发布 / 自由文本临时推送）：
+        //   - overlay:true  + url 非空 → 临时覆盖展示，不写 ConfigStore
+        //     （不持久化、不被心跳响应回带的 currentDisplayUrl 覆盖回去）
+        //   - overlay:true  + url 空   → 撤回覆盖，恢复基础页面（用 cfg.displayUrl）
+        //   - overlay:false（缺省）    → 永久切换基础页面，写 ConfigStore
+        const overlay = cmd.overlay === true;
+        if (overlay) {
+          if (cmd.url && cmd.url.length > 0) {
+            // 临时覆盖：直接 emit 切 Web，绕过 ConfigStore（避免被心跳同步逻辑覆盖）
+            eventBus.emit('displayUrlChanged', cmd.url as Object);
+            HeartbeatService.getInstance().reportPageLoaded(cmd.url);
+          } else {
+            // 撤回：切回 ConfigStore.cache 里的基础 displayUrl
+            const cfg = ConfigStore.getInstance().getAll();
+            const base = cfg.displayUrl ?? 'about:blank';
+            Logger.info(TAG, `displayPage overlay 撤回 → 恢复基础页 ${base}`);
+            eventBus.emit('displayUrlChanged', base as Object);
+          }
+        } else {
+          // 永久切换：写 ConfigStore（持久化 + emit）
+          if (cmd.url && cmd.url.length > 0) {
+            await ConfigStore.getInstance().setDisplayUrl(cmd.url);
+            HeartbeatService.getInstance().reportPageLoaded(cmd.url);
+          }
         }
         break;
       }
@@ -221,6 +241,21 @@ export class MqttClient {
         break;
       case 'screenshot':
         eventBus.emit('captureScreenshot');
+        break;
+      case 'displayRegion': {
+        // 区域公告：url 非空 → 主 Web 缩到 1-fraction，右/下侧 fraction 显示公告；空 → 撤销
+        const url = cmd.url ?? '';
+        const position = (cmd.regionPosition === 'bottom') ? 'bottom' : 'right';
+        let fraction = cmd.regionFraction ?? 0.3;
+        if (fraction < 0.1) fraction = 0.3;   // url 为空时 fraction=0，撤销路径忽略
+        if (fraction > 0.5) fraction = 0.5;
+        const payload: RegionChangePayload = { url, position, fraction };
+        eventBus.emit('regionChanged', payload as Object);
+        break;
+      }
+      case 'displayMarquee':
+        // V1 简化：仅 log；marquee 渲染未实装（Index 没专门的字幕条组件）
+        Logger.info(TAG, `displayMarquee text=${cmd.text ?? ''} mode=${cmd.marqueeMode ?? '(default)'}`);
         break;
       case 'startVnc':
       case 'stopVnc':
