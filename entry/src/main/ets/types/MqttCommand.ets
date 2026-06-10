@@ -64,3 +64,15 @@ export interface RegionChangePayload {
   position: 'bottom' | 'right';
   fraction: number;                         // 0.1 ~ 0.5
 }
+
+/** eventBus 'marqueeChanged' 事件 payload */
+export interface MarqueeChangePayload {
+  text: string;                             // 空字符串表示清除
+  mode: 'embedded' | 'overlay';
+  /**
+   * embedded 模式：postMessage 注入到 fids_webpage 内部，由 universal 等页面页脚显示
+   *   适用：设备基础页是 fids_page_config（自带 marquee 区）
+   * overlay 模式：player 渲染原生底部 bar（半透明黑底 ArkUI Marquee 组件）
+   *   适用：设备基础页是 page_template / custom_url（无自带 marquee 区）
+   */
+}

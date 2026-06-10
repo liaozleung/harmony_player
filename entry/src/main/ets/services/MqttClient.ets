@@ -14,7 +14,7 @@ import { HeartbeatService } from './HeartbeatService';
 import { SystemControl } from './SystemControl';
 import { eventBus } from '../utils/eventBus';
 import { Logger } from '../utils/logger';
-import { MqttCommand, RegionChangePayload } from '../types/MqttCommand';
+import { MqttCommand, RegionChangePayload, MarqueeChangePayload } from '../types/MqttCommand';
 
 const TAG = 'MqttClient';
 
@@ -253,10 +253,16 @@ export class MqttClient {
         eventBus.emit('regionChanged', payload as Object);
         break;
       }
-      case 'displayMarquee':
-        // V1 简化：仅 log；marquee 渲染未实装（Index 没专门的字幕条组件）
-        Logger.info(TAG, `displayMarquee text=${cmd.text ?? ''} mode=${cmd.marqueeMode ?? '(default)'}`);
+      case 'displayMarquee': {
+        // text 空 → 撤回；非空 → 显示字幕
+        // mode='embedded'：postMessage 给 fids_webpage 内部（适用 universal 等自带页脚 marquee 的页面）
+        // mode='overlay' ：player 渲染原生底部 bar（适用 page_template / custom_url 等无自带 marquee 的页面）
+        const text = cmd.text ?? '';
+        const mode = cmd.marqueeMode === 'embedded' ? 'embedded' : 'overlay';
+        const payload: MarqueeChangePayload = { text, mode };
+        eventBus.emit('marqueeChanged', payload as Object);
         break;
+      }
       case 'startVnc':
       case 'stopVnc':
         Logger.info(TAG, `${cmd.action} — V1 不支持，忽略`);

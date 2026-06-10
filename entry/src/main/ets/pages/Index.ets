@@ -5,7 +5,7 @@ import { ConfigStore } from '../services/ConfigStore';
 import { Watchdog } from '../services/Watchdog';
 import { ScreenshotService } from '../services/ScreenshotService';
 import { BrightnessChangePayload } from '../services/SystemControl';
-import { RegionChangePayload } from '../types/MqttCommand';
+import { RegionChangePayload, MarqueeChangePayload } from '../types/MqttCommand';
 import { eventBus } from '../utils/eventBus';
 import { Logger } from '../utils/logger';
 
@@ -29,6 +29,11 @@ struct Index {
   @State regionUrl: string = '';
   @State regionPosition: 'right' | 'bottom' = 'right';
   @State regionFraction: number = 0.3;
+  /**
+   * 底部滚动字幕 overlay 模式文本（embedded 模式不存这里，直接 postMessage 给 Web）。
+   * 空字符串=隐藏底部 bar。
+   */
+  @State marqueeOverlayText: string = '';
   controller: webview.WebviewController = new webview.WebviewController();
   regionController: webview.WebviewController = new webview.WebviewController();
 
@@ -38,6 +43,7 @@ struct Index {
   private offCapture: (() => void) | null = null;
   private offBrightness: (() => void) | null = null;
   private offRegion: (() => void) | null = null;
+  private offMarquee: (() => void) | null = null;
 
   aboutToAppear(): void {
     // 进入显示页面 → 隐藏鼠标（数字标牌纯展示，不需要鼠标）
@@ -92,6 +98,22 @@ struct Index {
       Logger.info(TAG, `亮度 overlay opacity → ${this.brightnessOverlayOpacity}`);
     });
 
+    // 底部滚动字幕 displayMarquee — 分 embedded/overlay 两种模式
+    this.offMarquee = eventBus.on('marqueeChanged', (payload?: Object | null): void => {
+      if (!payload) { this.marqueeOverlayText = ''; this.postMarqueeToWeb(''); return; }
+      const p = payload as MarqueeChangePayload;
+      Logger.info(TAG, `字幕变更 mode=${p.mode} text="${p.text}"`);
+      if (p.mode === 'embedded') {
+        // 字幕由 fids_webpage 自己显示在页脚 → player 原生底部 bar 不显示
+        this.marqueeOverlayText = '';
+        this.postMarqueeToWeb(p.text);
+      } else {
+        // overlay 模式 → 显示底部 bar；同时清空 webview 内部 marquee（防双重显示）
+        this.marqueeOverlayText = p.text;
+        this.postMarqueeToWeb('');
+      }
+    });
+
     // 区域公告 displayRegion
     this.offRegion = eventBus.on('regionChanged', (payload?: Object | null): void => {
       if (!payload) return;
@@ -117,7 +139,31 @@ struct Index {
     this.offCapture?.();
     this.offBrightness?.();
     this.offRegion?.();
+    this.offMarquee?.();
     Watchdog.getInstance().stop();
+  }
+
+  /**
+   * embedded 模式注入：通过 runJavaScript 给 fids_webpage 发 `marqueeOverride` 消息，
+   * 让 universal 等模板的页脚 marquee 区自己渲染。
+   *
+   * fids_webpage 的语义（FidsPageTemplate.jsx）：
+   *   - text 是字符串（含空字符串）→ override 该值（空字符串=显式清空 marquee）
+   *   - text 是 null 或非字符串    → 撤销 override，恢复 fids_page_config.marqueeTextZh
+   *
+   * 所以：text 非空 → 注入字符串；text 空 → 注入 null（让原本字幕恢复）。
+   */
+  private postMarqueeToWeb(text: string): void {
+    try {
+      // 空字符串当撤回处理：postMessage 的 text 传 null，触发 fids_webpage 恢复原 marquee
+      const safe = text && text.length > 0 ? JSON.stringify(text) : 'null';
+      const js = `(function(){try{window.postMessage({type:'marqueeOverride',text:${safe}},'*');}catch(e){}})();`;
+      this.controller.runJavaScript(js).catch((e: Object): void => {
+        Logger.warn(TAG, 'postMarqueeToWeb runJavaScript 失败', e);
+      });
+    } catch (e) {
+      Logger.warn(TAG, 'postMarqueeToWeb 失败', e);
+    }
   }
 
   @Builder
@@ -210,6 +256,31 @@ struct Index {
           .justifyContent(FlexAlign.Center)
           .backgroundColor('#000')
         }
+      }
+
+      // 底部滚动字幕 overlay 模式（embedded 模式由 fids_webpage 自己渲染，这里不显示）
+      // 在亮度 overlay 之下，会被亮度遮挡
+      if (this.marqueeOverlayText && this.marqueeOverlayText.length > 0) {
+        Row() {
+          Marquee({
+            start: true,
+            step: 8,           // 滚动速度 px/帧
+            loop: -1,          // 无限循环
+            fromStart: true,
+            src: this.marqueeOverlayText
+          })
+            .fontSize(28)
+            .fontColor('#ffeb3b')
+            .fontWeight(FontWeight.Bold)
+            .width('100%')
+        }
+        .width('100%')
+        .height(56)
+        .backgroundColor('rgba(0,0,0,0.7)')
+        .padding({ left: 16, right: 16 })
+        .position({ x: 0, y: '100%' })
+        .markAnchor({ x: 0, y: '100%' })
+        .hitTestBehavior(HitTestMode.None)
       }
 
       // 亮度黑色覆盖层（hitTestBehavior=None 让点击穿透到 Web）
